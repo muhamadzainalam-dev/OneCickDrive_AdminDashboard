@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Bounce, ToastContainer, toast } from "react-toastify";
 import { IoMdThumbsUp } from "react-icons/io";
+import listings from "@/data/listing";
+
+const STORAGE_KEY = "oneclickdrive_listings";
 
 export default function Dashboard() {
   const router = useRouter();
@@ -22,7 +25,7 @@ export default function Dashboard() {
       <div className="flex items-center">
         <IoMdThumbsUp className="mr-2 text-green-500 text-xl" />
         Info Saved!
-      </div>
+      </div>,
     );
 
   useEffect(() => {
@@ -30,14 +33,27 @@ export default function Dashboard() {
     if (!ok) window.location.href = "/";
   }, []);
 
-  const loadCarsData = async () => {
+  // Load from localStorage, fallback to static data
+  const loadCarsData = () => {
     try {
-      const res = await fetch("/pages/api/listings/FetchListing/");
-      const stuff = await res.json();
-      setCarsList(stuff);
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        setCarsList(JSON.parse(stored));
+      } else {
+        // First time: seed from static data and save to localStorage
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(listings));
+        setCarsList(listings);
+      }
     } catch (err) {
       console.log("error loading cars", err);
+      setCarsList(listings);
     }
+  };
+
+  // Save updated list to localStorage and state
+  const saveAndUpdate = (updatedList) => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedList));
+    setCarsList(updatedList);
   };
 
   useEffect(() => {
@@ -45,16 +61,56 @@ export default function Dashboard() {
   }, []);
 
   const startEditing = (item) => {
-    setEditing(item);
+    setEditing({ ...item });
     setEditModeOn(true);
   };
 
   const logoutNow = () => {
     setLogoutLoading(true);
     setTimeout(() => {
-      localStorage.clear(); // lazy way 😅
+      localStorage.removeItem("isLoggedIn");
       window.location.href = "/";
     }, 800);
+  };
+
+  // Approve a listing
+  const approveListing = (item) => {
+    setBtnLoader({ id: item.id, type: "approve" });
+    setTimeout(() => {
+      const updated = carsList.map((c) =>
+        c.id === item.id ? { ...c, status: "approved" } : c,
+      );
+      saveAndUpdate(updated);
+      notifyUpdate();
+      setBtnLoader({ id: null, type: null });
+    }, 400);
+  };
+
+  // Reject a listing
+  const rejectListing = (item) => {
+    setBtnLoader({ id: item.id, type: "reject" });
+    setTimeout(() => {
+      const updated = carsList.map((c) =>
+        c.id === item.id ? { ...c, status: "rejected" } : c,
+      );
+      saveAndUpdate(updated);
+      notifyUpdate();
+      setBtnLoader({ id: null, type: null });
+    }, 400);
+  };
+
+  // Save edited listing
+  const saveEdit = () => {
+    setSavingNow(true);
+    setTimeout(() => {
+      const updated = carsList.map((c) =>
+        c.id === editing.id ? { ...editing } : c,
+      );
+      saveAndUpdate(updated);
+      notifyUpdate();
+      setEditModeOn(false);
+      setSavingNow(false);
+    }, 400);
   };
 
   return (
@@ -98,7 +154,6 @@ export default function Dashboard() {
                 Location
               </th>
               <th className="text-left">
-                {/* Status dropdown filter */}
                 <div className="flex items-center gap-2">
                   Status
                   <select
@@ -122,7 +177,7 @@ export default function Dashboard() {
                 .filter((item) =>
                   filterByStatus === "all"
                     ? true
-                    : item.status === filterByStatus
+                    : item.status === filterByStatus,
                 )
                 .sort((a, b) => {
                   const sortWeight = { pending: 1, approved: 2, rejected: 3 };
@@ -152,8 +207,8 @@ export default function Dashboard() {
                           item.status === "approved"
                             ? "bg-green-100 text-green-700 dark:bg-green-700 dark:text-white"
                             : item.status === "rejected"
-                            ? "bg-red-100 text-red-600 dark:bg-red-600 dark:text-white"
-                            : "bg-yellow-500 text-yellow-800 dark:bg-yellow-600 dark:text-white"
+                              ? "bg-red-100 text-red-600 dark:bg-red-600 dark:text-white"
+                              : "bg-yellow-500 text-yellow-800 dark:bg-yellow-600 dark:text-white"
                         }`}
                       >
                         {item.status}
@@ -163,29 +218,7 @@ export default function Dashboard() {
                       <div className="flex flex-wrap md:flex-nowrap items-center gap-2">
                         {/* Approve Button */}
                         <button
-                          onClick={async () => {
-                            setBtnLoader({ id: item.id, type: "approve" });
-                            const updatedStatus = {
-                              ...item,
-                              status: "approved",
-                            };
-
-                            try {
-                              await fetch(`/pages/api/listings/${item.id}`, {
-                                method: "PUT",
-                                headers: {
-                                  "Content-Type": "application/json",
-                                },
-                                body: JSON.stringify(updatedStatus),
-                              });
-                              await loadCarsData(); // just reload everything again
-                              notifyUpdate();
-                            } catch (err) {
-                              console.log("approve failed", err);
-                            } finally {
-                              setBtnLoader({ id: null, type: null });
-                            }
-                          }}
+                          onClick={() => approveListing(item)}
                           className="bg-green-600 hover:bg-green-500 text-white text-xs px-3 py-1 rounded transition"
                         >
                           {btnLoader.id === item.id &&
@@ -198,29 +231,7 @@ export default function Dashboard() {
 
                         {/* Reject Button */}
                         <button
-                          onClick={async () => {
-                            setBtnLoader({ id: item.id, type: "reject" });
-                            const updatedStatus = {
-                              ...item,
-                              status: "rejected",
-                            };
-
-                            try {
-                              await fetch(`/pages/api/listings/${item.id}`, {
-                                method: "PUT",
-                                headers: {
-                                  "Content-Type": "application/json",
-                                },
-                                body: JSON.stringify(updatedStatus),
-                              });
-                              await loadCarsData(); // reload after rejection
-                              notifyUpdate();
-                            } catch (err) {
-                              console.log("rejection failed", err);
-                            } finally {
-                              setBtnLoader({ id: null, type: null });
-                            }
-                          }}
+                          onClick={() => rejectListing(item)}
                           className="bg-red-500 hover:bg-red-600 text-white text-xs px-3 py-1 rounded transition"
                         >
                           {btnLoader.id === item.id &&
@@ -247,6 +258,7 @@ export default function Dashboard() {
         </table>
       </div>
 
+      {/* Edit Modal */}
       <AnimatePresence>
         {editModeOn && editing && (
           <motion.div
@@ -291,8 +303,6 @@ export default function Dashboard() {
                   value={editing.location}
                   onChange={(val) => setEditing({ ...editing, location: val })}
                 />
-
-                {/* Status dropdown */}
                 <div>
                   <label className="block mb-1">Status</label>
                   <select
@@ -309,7 +319,6 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* Footer buttons */}
               <div className="flex justify-end mt-6 space-x-3">
                 <button
                   onClick={() => setEditModeOn(false)}
@@ -318,25 +327,7 @@ export default function Dashboard() {
                   Cancel
                 </button>
                 <button
-                  onClick={async () => {
-                    setSavingNow(true);
-                    try {
-                      await fetch(`/pages/api/listings/${editing.id}`, {
-                        method: "PUT",
-                        headers: {
-                          "Content-Type": "application/json",
-                        },
-                        body: JSON.stringify(editing),
-                      });
-                      await loadCarsData(); // reload to reflect edit
-                      notifyUpdate();
-                      setEditModeOn(false);
-                    } catch (err) {
-                      console.error("save failed", err);
-                    } finally {
-                      setSavingNow(false);
-                    }
-                  }}
+                  onClick={saveEdit}
                   className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded min-w-[120px] flex items-center justify-center"
                 >
                   {savingNow ? <div className="loader" /> : "Save Changes"}
@@ -360,7 +351,6 @@ export default function Dashboard() {
   );
 }
 
-// basic input
 function InputField({ label, value, onChange }) {
   return (
     <div>
